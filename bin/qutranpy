@@ -1,0 +1,20 @@
+#!/usr/bin/python2.7
+from __future__ import print_function
+import os
+path = os.environ["QUTRANPYROOT"] # main path of the program
+pysrc = path+"/pysrc/" # path for the python library
+
+i=0
+while True: # new temporal folder
+  name = "qutranpy_"+str(i)
+  if not name in os.listdir("/tmp/"): # if it does not exist
+    os.system("mkdir /tmp/"+name) # create folder
+    os.chdir("/tmp/"+name) # create folder
+    os.system("cp "+path+"/src/*.*  /tmp/"+name) # copy files to temporal folder
+    print("Temporal folder is",name)
+    break # break loop
+  i += 1 # increase counter
+os.system("python2.7 main.py "+pysrc)
+
+
+

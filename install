@@ -1,0 +1,29 @@
+#!/usr/bin/python2.7
+
+# instalation script
+
+from __future__ import print_function
+import os
+
+# compile fortran files
+os.chdir("pysrc/fortran")
+os.system("python2.7 compile.py")
+os.chdir("../../") # return to main folder
+
+path = os.getcwd() # current path
+
+# add this line to the .bashrc
+line = "# Added by QUTRANPY\n"
+line += "export PATH=$PATH:"+path+"/bin\n"  
+line += "export QUTRANPYROOT='"+path+"'\n\n"
+print(line)
+fo = open(os.environ["HOME"]+"/.bashrc","a")
+fo.write(line)
+fo.close()
+
+
+print("\n########################################################\n")
+print("You can run the program openning a new terminal and typing")
+print("   qutranpy")
+print("\n########################################################\n")
+
