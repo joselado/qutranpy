@@ -131,8 +131,8 @@ def get_moments_ij(m0,n=100,i=0,j=0,use_fortran=use_fortran):
     return mus
 
 def get_moments_vivj(m0,vi,vj,n=100,use_fortran=False):
-  if not use_fortran: get_moments_vivj_python(m0,vi,vj,n=n)
-  else: get_moments_vivj_fortran(m0,vi,vj,n=n)
+  if not use_fortran: return get_moments_vivj_python(m0,vi,vj,n=n)
+  else: return get_moments_vivj_fortran(m0,vi,vj,n=n)
 
 
 def get_moments_vivj_python(m0,vi,vj,n=100):
@@ -210,11 +210,15 @@ def ldos0d(m_in,i=0,scale=10.,npol=None,ne=500,kernel="jackson"):
 
 
 
+ldos = ldos0d
+
+
+
 def tdos(m_in,scale=10.,npol=None,ne=500,kernel="jackson",
-              ntries=20,ewindow=None):
+              ntries=20,ewindow=None,frand=None):
   """Return two arrays with energies and local DOS"""
   if npol is None: npol = ne
-  mus = random_trace(m_in/scale,ntries=ntries,n=npol) # get coefficients
+  mus = random_trace(m_in/scale,ntries=ntries,n=npol,fun=frand) 
   if ewindow is None or abs(ewindow)>scale: # no window provided
     xs = np.linspace(-1.0,1.0,ne,endpoint=True)*0.99 # energies
   else:

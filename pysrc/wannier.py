@@ -198,6 +198,7 @@ def read_hamiltonian(input_file="hr_truncated.dat",is_real=False):
   tlist = []
   def get_t(i,j,k):
     norb = np.max([np.max(np.abs(m[3])),np.max(np.abs(m[4]))])
+    norb = int(norb)
     mo = np.matrix(np.zeros((norb,norb),dtype=np.complex))  
     for l in mt: # look into the file
       if i==int(l[0]) and j==int(l[1]) and k==int(l[2]):
@@ -233,8 +234,11 @@ def read_hamiltonian(input_file="hr_truncated.dat",is_real=False):
 
 def read_multicell_hamiltonian(input_file="hr_truncated.dat",
                                 ncells=None,win_file="wannier.win",
-                                dim=2,skip_win=False):
+                                dim=2,skip_win=False,path=None):
   """Reads an output hamiltonian from wannier"""
+  if path is not None: 
+      inipath = os.getcwd() # current path
+      os.chdir(path) # go there
   mt = np.genfromtxt(input_file) # get file
   m = mt.transpose() # transpose matrix
   if ncells is None: # use all the hoppings
@@ -283,6 +287,16 @@ def read_multicell_hamiltonian(input_file="hr_truncated.dat",
       print(h.geometry.r)
   #  raise # error if dimensions dont match
   h.dimensionality = dim 
+  if path is not None: 
+      os.chdir(inipath) # go back
+      h.wannierpath = path # store
+    else: h.wannierpath = None
+  # now lets add the SOC method
+  def get_soc(self,name,soc):
+      if not self.has_spin: raise # only for spinful
+      self.intra = self.intra + generate_soc(name,soc,path=self.wannierpath) 
+  import types
+  h.get_soc = types.MethodType(get_soc,h) # add the method
   return h
 
 
@@ -366,8 +380,11 @@ def get_num_atoms(specie,input_file):
 
 
 
-def generate_soc(specie,value,input_file="wannier.win",nsuper=1):
+def generate_soc(specie,value,input_file="wannier.win",nsuper=1,path=None):
   """Add SOC to a hamiltonian based on wannier.win"""
+  if path is not None: 
+      inipath = os.getcwd() # current path
+      os.chdir(path) # go there
   o = open(".soc.status","w")
   iat = 1 # atom counter
   orbnames = names_soc_orbitals(specie) # get which are the orbitals
@@ -398,7 +415,10 @@ def generate_soc(specie,value,input_file="wannier.win",nsuper=1):
   mo = [[None for i in range(n)] for j in range(n)]
   for i in range(n): mo[i][i] = csc(m) # diagonal elements
   mo = bmat(mo).todense() # dense matrix
-  return mo*value # return matrix
+  if path is not None: 
+      os.chdir(inipath) # go there
+      print(np.max(np.abs(mo)))
+  return np.matrix(mo*value) # return matrix
 #  for name in atoms: # loop over atoms
 
 
@@ -435,6 +455,7 @@ def ylm2xyz_l1(has_spin=True):
 
 def soc_l(l):
   """Calculate the spin orbit coupling in a basis of spherical harmonics"""
+  l = int(l)
   nm = 2*l + 1 # number of components
   zero = np.matrix([[0.0j for i in range(2*nm)] for j in range(2*nm)]) 
   # initialize matrices

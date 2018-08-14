@@ -95,6 +95,21 @@ def half_and_half(h1,h2,fun=None,tlen=0.001,direction=1):
 
 
 
+def heterostructure(h1,h2):
+  """Build a heterostructure, assuming that the only difference
+  are onsite matrices"""
+  h = h1.copy() # copy Hamiltonian
+  n = h.intra.shape[0]//2 # retain these elements
+  for i in range(n):
+    for j in range(n):
+      h.intra[i,j] = h2.intra[i,j]
+  return h # return Hamiltonian
+
+
+
+
+
+
 
 
 

@@ -129,7 +129,7 @@ deltaz = deltaz.H
 # redefine the functions according to the previous notation
 
 def time_reversal(m):
-  """Do the time reversal of this matrix"""
+  """Do the spinful time reversal of this matrix"""
   from hamiltonians import sy
   n = m.shape[0]//2 # number of spinful blocks
   msy = [[None for ri in range(n)] for j in range(n)]

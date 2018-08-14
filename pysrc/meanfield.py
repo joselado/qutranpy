@@ -60,7 +60,7 @@ def hubbard_pairing_ud(i,n,g=1.0):
   v.dir = [0,0,0] # direction of the interaction 
   v.g = g
   v.i = i
-  v.i = i
+  v.j = i
   return v
 
 
@@ -72,7 +72,7 @@ def hubbard_pairing_du(i,n,g=1.0):
   v.dir = [0,0,0] # direction of the interaction 
   v.g = g
   v.i = i
-  v.i = i
+  v.j = i
   return v
 
 
@@ -165,9 +165,13 @@ def guess(h,mode="ferro",fun=0.01):
   """Return a mean field matrix guess given a certain Hamiltonian"""
   h0 = h.copy() # copy Hamiltonian
   h0 = h0.get_multicell() # multicell
-  h0.intra *= 0. # initialize
+#  h0.intra *= 0. # initialize
+  h0.clean() # clean the Hamiltonian
   if mode=="ferro":
+    print("AAA")
     h0.add_zeeman(fun)
+  elif mode=="random":
+    h0.add_magnetism([np.random.random(3)-0.5 for i in h.geometry.r])
   elif mode=="antiferro":
     h0.add_antiferromagnetism(fun)
   elif mode=="imbalance":

@@ -25,3 +25,26 @@ def bulk2ribbon(g,boundary=[1,0],n=10,clean=True):
   return go
 
 
+
+
+
+
+
+def hamiltonian_ribbon(hin,n=10):
+  """Return the Hamiltonian of a film"""
+  h = hin.copy() # copy Hamiltonian
+  import multicell
+  h = multicell.supercell_hamiltonian(h,nsuper=[1,n,1])
+  hopout = [] # list
+  for i in range(len(h.hopping)): # loop over hoppings
+    if abs(h.hopping[i].dir[2])<0.1: 
+      if abs(h.hopping[i].dir[1])<0.1: 
+        hopout.append(h.hopping[i])
+  h.hopping = hopout
+  h.dimensionality = 1
+  h.geometry.dimensionality = 1
+  import sculpt
+  h.geometry = sculpt.rotate_a2b(h.geometry,h.geometry.a1,np.array([1.,0.,0.]))
+  return h
+
+

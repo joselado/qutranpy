@@ -6,7 +6,7 @@ import geometry
 
 
 def twisted_bilayer(m0=3,rotate=True,shift=[0.,0.],center="AB/BA",
-  sublattice=True):
+  sublattice=True,r=1):
   """Return the geometry for twisted bilayer graphene"""
   g = geometry.honeycomb_lattice()
   g.has_sublattice = False
@@ -17,7 +17,7 @@ def twisted_bilayer(m0=3,rotate=True,shift=[0.,0.],center="AB/BA",
   else: pass
   g = geometry.non_orthogonal_supercell(g,m=[[-1,0,0],[0,1,0],[0,0,1]])
 #  m0 = 3
-  r = 1
+#  r = 1
   theta = np.arccos((3.*m0**2+3*m0*r+r**2/2.)/(3.*m0**2+3*m0*r+r**2))
   print("Theta",theta*180.0/np.pi)
   nsuper = [[m0,m0+r,0],[-m0-r,2*m0+r,0],[0,0,1]]
@@ -73,6 +73,7 @@ def twisted_bilayer(m0=3,rotate=True,shift=[0.,0.],center="AB/BA",
     g1.z = np.round(g1.z,2) # delete the small shift
     g1.xyz2r() # update coordinates
     g1.sublattice = np.array(sl) # store sublattice
+  g1.get_fractional() # get fractional coordinates 
   return g1
 
 

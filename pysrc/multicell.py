@@ -77,7 +77,7 @@ def hk_gen(h):
       if np.sum(np.abs(coo_matrix(t.m).data))>1e-7: hopping.append(t) # store this hopping
     else:
       if np.sum(np.abs(t.m))>1e-7: hopping.append(t) # store this hopping
-  if h.dimensionality == 0: return None
+  if h.dimensionality == 0: return h.intra
   elif h.dimensionality == 1: # one dimensional
     def hk(k):
       """k dependent hamiltonian, k goes from 0 to 1"""
@@ -97,10 +97,6 @@ def hk_gen(h):
 #      k = np.array([k[0],k[1]]) # convert to array
       mout = h.intra.copy() # intracell term
       for t in hopping: # loop over matrices
-#        d = t.dir
-#        d = np.array([d[0],d[1]]) # vector director of hopping
-#        phi = d.dot(k) # phase
-#        tk = t.m * np.exp(1j*np.pi*2.*phi) # k hopping
         tk = t.m * h.geometry.bloch_phase(t.dir,k) # k hopping
         mout = mout + tk 
       return mout
@@ -108,17 +104,10 @@ def hk_gen(h):
   elif h.dimensionality == 3: # three dimensional
     def hk(k):
       """k dependent hamiltonian, k goes from 0 to 1"""
-#      k = np.array([k[0],k[1],k[2]]) # convert to array
       mout = h.intra.copy() # intracell term
       for t in h.hopping: # loop over matrices
-#        d = t.dir
-#        d = np.array([d[0],d[1],d[2]]) # vector director of hopping
-#        phi = d.dot(k) # phase
-#        tk = t.m * np.exp(1j*np.pi*2.*phi) # k hopping
         tk = t.m * h.geometry.bloch_phase(t.dir,k) # k hopping
         mout = mout + tk 
-#      mout = np.matrix(mout)
-#      if np.max(np.abs(mout-mout.H))>0.001: raise
       return mout
     return hk  # return the function
   else: raise
@@ -129,15 +118,18 @@ def hk_gen(h):
 
 
 
-def turn_spinful(h):
+def turn_spinful(h,enforce_tr=False):
   """Turn a hamiltonian spinful"""
   from increase_hilbert import spinful
+  from superconductivity import time_reversal
   if h.has_eh: raise
   if h.has_spin: return # return if already has spin
   h.has_spin = True # put spin
-  h.intra = spinful(h.intra) # spinful intra
+  def fun(m):
+    return spinful(m)
+  h.intra = fun(h.intra) # spinful intra
   for i in range(len(h.hopping)): 
-    h.hopping[i].m = spinful(h.hopping[i].m) # spinful hopping
+    h.hopping[i].m = fun(h.hopping[i].m) # spinful hopping
 
 
 
@@ -235,9 +227,10 @@ def clean(h,cutoff=0.0001):
 
 
 
-def supercell(hin,nsuper=[1,1,1],sparse=True,ncut=3):
+def supercell_hamiltonian(hin,nsuper=[1,1,1],sparse=True,ncut=3):
   """ Create a ribbon hamiltonian object"""
-  raise # there is something wrong with this function
+#  raise # there is something wrong with this function
+  print("This function might have something wrong")
   if not hin.is_multicell: h = turn_multicell(hin)
   else: h = hin # nothing otherwise
   hr = h.copy() # copy hamiltonian
@@ -324,7 +317,6 @@ def derivative(h,k,order=[1,0]):
 def parametric_hopping_hamiltonian(h,cutoff=5,fc=None,rcut=5.0):
   """ Gets a first neighbor hamiltonian"""
   from neighbor import parametric_hopping
-  from increase_hilbert import spinful
   if fc is None:
     rcut = 2.1 # stop in this neighbor
     def fc(r1,r2):
@@ -337,8 +329,7 @@ def parametric_hopping_hamiltonian(h,cutoff=5,fc=None,rcut=5.0):
   h.is_multicell = True 
 # first neighbors hopping, all the matrices
   a1, a2, a3 = g.a1, g.a2, g.a3
-  if h.has_spin: h.intra = spinful(parametric_hopping(r,r,fc)) # intra matrix
-  else: h.intra = parametric_hopping(r,r,fc) # intra matrix
+  h.intra = h.spinless2full(parametric_hopping(r,r,fc)) # intra matrix
   # generate directions
   dirs = h.geometry.neighbor_directions() # directions of the hoppings
   # generate hoppings
@@ -352,8 +343,7 @@ def parametric_hopping_hamiltonian(h,cutoff=5,fc=None,rcut=5.0):
         if not close_enough(r,r2,rcut=rcut): # check if we can skip this one
 #          print("Skipping hopping",[i1,i2,i3])
           continue
-        if h.has_spin: t.m = spinful(parametric_hopping(r,r2,fc))
-        else: t.m = parametric_hopping(r,r2,fc)
+        t.m = h.spinless2full(parametric_hopping(r,r2,fc))
         t.dir = [i1,i2,i3] # store direction
         h.hopping.append(t) # append 
   return h
@@ -468,6 +458,31 @@ def turn_no_multicell(h):
       elif np.sum(np.abs(t.m))>0.0001 and np.max(np.abs(t.dir))>1: raise # Uppps, not possible
   ho.hopping = [] # empty list
   return ho
+
+
+
+def kchain(h,k=[0.,0.,0.]):
+  """Return the onsite and hopping for a particular k"""
+#  h = h0.copy() # copy Hamiltonian
+#  h = turn_multicell(h0) # multicell form
+  if not h.is_multicell: h = h.get_multicell()
+  dim = h.dimensionality # dimensionality
+  if dim>1: # 2D or 3D
+    intra = np.zeros(h.intra.shape) # zero amtrix
+    inter = np.zeros(h.intra.shape) # zero amtrix
+    intra = h.intra # initialize
+    for t in h.hopping: # loop over hoppings
+      tk = t.m * h.geometry.bloch_phase(t.dir,k) # k hopping
+      if t.dir[dim-1]==0: intra = intra + tk # add contribution 
+      if t.dir[dim-1]==1: inter = inter + tk # add contribution 
+    return intra,inter 
+  else: raise
+
+
+
+
+
+
 
 
 

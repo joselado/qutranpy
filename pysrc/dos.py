@@ -7,6 +7,23 @@ import time
 import timing
 import kpm
 
+try:
+  import dosf90 
+  calculate_dos = dosf90.calculate_dos # use the Fortran routine
+#  raise
+except:
+  print("Something wrong with FORTRAN in DOS")
+  def calculate_dos(es,xs,d):
+    ndos = len(xs)
+    delta = d/10.
+    ys,xs = np.histogram(es,bins=ndos) # create the histogram
+    lorentz = np.linspace(-1.,1.,len(ys)) # number of energies
+    lorentz = delta/(delta*delta + lorentz*lorentz) # smoothing function
+    ys = np.convolve(lorentz,ys,mode="same") # convolve lorentz and histogram
+    return ys
+
+
+
 
 
 def dos_surface(h,output_file="DOS.OUT",
@@ -26,9 +43,9 @@ def dos_surface(h,output_file="DOS.OUT",
 
 
 
-def dos0d(h,es=None,delta=0.001):
+def dos0d(h,es=None,delta=0.01):
   """Calculate density of states of a 0d system"""
-  if es is None: es = np.linspace([-4,4,100])
+  if es is None: es = np.linspace(-4,4,500)
   ds = [] # empty list
   if h.dimensionality==0:  # only for 0d
     iden = np.identity(h.intra.shape[0],dtype=np.complex) # create identity
@@ -91,8 +108,8 @@ def write_dos(es,ds,output_file="DOS.OUT"):
 
 
 
-def dos1d(h,use_kpm=False,scale=10.,nk=100,npol=100,ntries=100,
-          ndos=300,delta=0.01):
+def dos1d(h,use_kpm=False,scale=10.,nk=100,npol=100,ntries=2,
+          ndos=1000,delta=0.01,ewindow=None,frand=None):
   """ Calculate density of states of a 1d system"""
   if h.dimensionality!=1: raise # only for 1d
   ks = np.linspace(0.,1.,nk,endpoint=False) # number of kpoints
@@ -103,15 +120,20 @@ def dos1d(h,use_kpm=False,scale=10.,nk=100,npol=100,ntries=100,
   else:
     h.turn_sparse() # turn the hamiltonian sparse
     hkgen = h.get_hk_gen() # get generator
-    mus = np.array([0.0j for i in range(2*npol)]) # initialize polynomials
+    yt = np.zeros(ndos) # number of dos
     import kpm
-    for k in ks: # loop over kpoints
+    ts = timing.Testimator("DOS") 
+    for i in range(nk): # loop over kpoints
+      k = np.random.random(3) # random k-point
       hk = hkgen(k) # hamiltonian
-      mus += kpm.random_trace(hk/scale,ntries=ntries,n=npol)
-    mus /= nk # normalize by the number of kpoints
-    xs = np.linspace(-0.9,0.9,4*npol) # x points
-    ys = kpm.generate_profile(mus,xs) # generate the profile
-    write_dos(xs*scale,ys) # write in file
+      (xs,yi) = kpm.tdos(hk,scale=scale,npol=npol,frand=frand,ewindow=ewindow,
+                  ntries=ntries,ne=ndos)
+      yt += yi # Add contribution
+      ts.remaining(i,nk)
+    yt /= nk # normalize
+    write_dos(xs,yt) # write in file
+    print()
+    return xs,yt
 
 
 
@@ -155,16 +177,7 @@ def calculate_dos_hkgen(hkgen,ks,ndos=100,delta=None,
   nk = len(ks) # number of kpoints
   if delta is None: delta = 5./nk # automatic delta
   xs = np.linspace(np.min(es)-.5,np.max(es)+.5,ndos) # create x
-  try:
-    from dosf90 import calculate_dos
-    ys = calculate_dos(es,xs,delta) # use the Fortran routine
-  except:
-    print("Something wrong with FORTRAN in DOS")
-    ys,xs = np.histogram(es,bins=ndos) # create the histogram
-    lorentz = np.linspace(-1.,1.,len(ys)) # number of energies
-    lorentz = delta/(delta*delta + lorentz*lorentz) # smoothing function
-    ys = np.convolve(lorentz,ys,mode="same") # convolve lorentz and histogram
-    ys = np.array([np.sum(1./(delta*delta+(es-x)*(es-x))) for x in xs])
+  ys = calculate_dos(es,xs,delta) # use the Fortran routine
   ys /= nk # normalize 
   write_dos(xs,ys) # write in file
   print("\nDOS finished")
@@ -225,12 +238,7 @@ def dos2d(h,use_kpm=False,scale=10.,nk=100,ntries=1,delta=None,
 def dos3d(h,scale=10.,nk=20,delta=None,ndos=100,random=False):
   """ Calculate density of states of a 2d system"""
   if h.dimensionality!=3: raise # only for 2d
-  ks = []
-  for ik in np.linspace(0.,1.,nk,endpoint=False):
-    for jk in np.linspace(0.,1.,nk,endpoint=False):
-      for kk in np.linspace(0.,1.,nk,endpoint=False):
-        if random: ks.append(np.random.random(3)) # add point
-        else: ks.append(np.array([ik,jk,kk])) # add point
+  ks = [np.random.random(3) for i in range(nk)] # number of kpoints
   hkgen = h.get_hk_gen() # get generator
   if delta is None: delta = 10./ndos # smoothing
   calculate_dos_hkgen(hkgen,ks,ndos=ndos,delta=delta) # conventional algorithm
@@ -261,7 +269,6 @@ def dos2d_ewindow(h,energies=np.linspace(-1.,1.,30),delta=None,info=False,
     write_dos(energies,ys) # write in file
     return
   else: # do not use green function    
-    from dosf90 import calculate_dos # import fortran library
     import scipy.linalg as lg
     kxs = np.linspace(0.,1.,nk)
     kys = np.linspace(0.,1.,nk)
@@ -290,7 +297,6 @@ def dos1d_ewindow(h,energies=np.linspace(-1.,1.,30),delta=None,info=False,
   if delta is None: # pick a good delta value
     delta = 0.1*(max(energies) - min(energies))/len(energies)
   if True: # do not use green function    
-    from dosf90 import calculate_dos # import fortran library
     import scipy.linalg as lg
     kxs = np.linspace(0.,1.,nk)
     hkgen= h.get_hk_gen() # get hamiltonian generator
@@ -378,6 +384,37 @@ def dos(h,energies=np.linspace(-4.0,4.0,400),delta=0.01,nk=10,
     elif h.dimensionality==1:
       return dos1d(h,ndos=len(energies),delta=delta)
     else: raise
+
+
+
+def bulkandsurface(h1,energies=np.linspace(-1.,1.,100),operator=None,
+                    delta=0.01,hs=None,nk=30):
+  """Compute the DOS of the bulk and the surface"""
+  tr = timing.Testimator("KDOS") # generate object
+  ik = 0
+  h1 = h1.get_multicell() # multicell Hamiltonian
+  kpath = [np.random.random(3) for i in range(nk)] # loop
+  dosout = np.zeros((2,len(energies))) # output DOS
+  for k in kpath:
+    tr.remaining(ik,len(kpath)) # generate object
+    ik += 1
+    outs = green.surface_multienergy(h1,k=k,energies=energies,delta=delta,hs=hs)
+    ie = 0
+    for (energy,out) in zip(energies,outs): # loop over energies
+      # compute dos
+      ig = 0
+      for g in out: # loop
+        if operator is None: d = -g.trace()[0,0].imag # only the trace 
+        elif callable(operator): d = operator(g,k=k) # call the operator
+        else:  d = -(g*operator).trace()[0,0].imag # assume it is a matrix
+        dosout[ig,ie] += d # store
+        ig += 1 # increase site
+      ie += 1 # increase energy
+  # write in file
+  dosout/=nk # normalize
+  np.savetxt("DOS_BULK_SURFACE.OUT",np.matrix([energies,dosout[0],dosout[1]]).T)
+
+
 
 
 

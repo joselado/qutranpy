@@ -9,14 +9,17 @@ import meanfield
 import groundstate
 import scipy.optimize as optimize
 import klist
+import inout
 
 from meanfield import guess # function to calculate guesses
 try:
   import correlatorsf90
   multicorrelator = correlatorsf90.multicorrelator
   multicorrelator_bloch = correlatorsf90.multicorrelator_bloch
+  use_multicorrelator = True
 except:
   print("WARNING, FORTRAN not working in scftypes.py")
+  use_multicorrelator = False
 #  raise
 #  def multicorrelator
 
@@ -24,9 +27,17 @@ except:
 timing = True
 
 
+def load(input_file="SCF.pkl"):
+  """Get a selfconsistent calculation"""
+  return inout.load(input_file)
 
 class scfclass(): 
   """Class for a selfconsistent calculation"""
+  def copy(self):
+    from copy import deepcopy
+    return deepcopy(self)
+  def save(self,output_file="SCF.pkl"):
+    inout.save(self,output_file)
   def __init__(self,h):
     self.iteration = 0 # initialize
     self.scfmode = "filling" # do SCF fixing the number of filled states
@@ -37,7 +48,11 @@ class scfclass():
     self.fermi = 0.0 # fermi energy
     self.error = 0.0 # error in the selfconsistency
     self.gap = 0.0 # gap of the system
-    self.correlator_mode = "multicorrelator" # multicorrelator mode 
+    self.smearing = None
+    if use_multicorrelator: # fortran library is present
+      self.correlator_mode = "multicorrelator" # multicorrelator mode 
+    else:
+      self.correlator_mode = "plain" # multicorrelator mode 
 #    self.correlator_mode = "1by1" # multicorrelator mode 
     self.bloch_multicorrelator = False # multicorrelator with Bloch phases
     self.enforce_symmetry = "none" # do not enforce any symmetry
@@ -48,11 +63,12 @@ class scfclass():
     self.sites = len(self.hamiltonian.geometry.r) # number of sites
     self.iteration = 0 # first iteration
     self.filling = 0.5 # half filling
+    self.mixing = 0.9 # initialize the mixing
     self.fermi_shift = 0.0 # shift in the fermi energy
     self.energy_cutoff = 1.0 # energy for the selfconsistency
     self.num_waves = 10 # number of waves to compute
     self.use_weights = False # calculate SCF using weights
-  def update_occupied_states(self,filling=0.5,fermi_shift=0.0):
+  def update_occupied_states(self,fermi_shift=0.0):
     """Get the eigenvectors for a mesh of kpoints"""
     mine = None # minimum energy
     if self.scfmode=="fermi" and self.is_sparse:
@@ -73,7 +89,7 @@ class scfclass():
 #    mine = min(es)*0.9 # minimum energy retained
     self.kfac = len(klist.kmesh(self.hamiltonian.dimensionality,nk=self.nkgrid))
     if self.scfmode=="filling": # get the fermi energy if the mode requires it 
-      self.fermi = get_fermi_energy(es,filling,fermi_shift=fermi_shift) 
+      self.fermi = get_fermi_energy(es,self.filling,fermi_shift=fermi_shift) 
     elif self.scfmode=="fermi": pass # do nothing
     self.gap = get_gap(es,self.fermi) # store the gap
     if self.energy_cutoff is not None:
@@ -82,7 +98,7 @@ class scfclass():
         raise
       print("Warning!!!! Performing calculation with an energy cutoff")
     eoccs,voccs,koccs = get_occupied_states(es,ws,ks,self.fermi,
-                            mine=self.energy_cutoff) # occupied states
+                            mine=self.energy_cutoff,smearing = self.smearing)
     self.wavefunctions = voccs # store wavefunctions
 #    print(len(voccs),voccs.shape,len(voccs[0]))
     self.energies = eoccs # store energies
@@ -105,10 +121,11 @@ class scfclass():
     """Updates the total mean field Hamiltonian"""
     self.hamiltonian = self.hamiltonian0.copy() # copy original
     self.hamiltonian.intra += self.mf[(0,0,0)] # add mean field
-    for i in range(len(self.hamiltonian.hopping)):
-      d = self.hamiltonian.hopping[i].dir
-      if tuple(d) in self.mf:
-        self.hamiltonian.hopping[i].m += self.mf[tuple(d)]
+    if self.hamiltonian.dimensionality>0:
+      for i in range(len(self.hamiltonian.hopping)):
+        d = self.hamiltonian.hopping[i].dir
+        if tuple(d) in self.mf:
+          self.hamiltonian.hopping[i].m += self.mf[tuple(d)]
     
   def setup_interaction(self,mode="Hubbard",g=1.0):
     """Create the operators that will determine the interactions"""
@@ -249,7 +266,8 @@ class scfclass():
     mfnew = dict() # new mean field
     accu = 0.0 # accumulator
     for key in self.mf: mfnew[key] = self.hamiltonian.intra*0.  # initialize 
-    np.savetxt("VS_SCF.OUT",np.matrix([range(len(self.cij)),np.abs(self.cij)]).T)
+    if self.correlator_mode == "multicorrelator":
+      np.savetxt("VS_SCF.OUT",np.matrix([range(len(self.cij)),np.abs(self.cij)]).T)
     fvs = open("VAV_VBV.OUT","w") # open file
     fvs.write("# dx dy dz i j abs(v)\n")
     for v in self.interactions: # loop over interactions
@@ -259,11 +277,6 @@ class scfclass():
       elif v.contribution=="A":
         tmp = v.a*v.vbv*v.g 
         accu += np.abs(v.vbv) 
-#        print("\n",v.dir,v.i,v.j)
-#        print(v.a)
-#        print(v.b)
-#        print(np.abs(v.vav),np.abs(v.vbv))
-#        print(np.angle(v.vav)/np.pi*180,np.angle(v.vbv)/np.pi*180)
       else: raise
       fvs.write(str(v.dir[0])+"   ")
       fvs.write(str(v.dir[1])+"   ")
@@ -294,9 +307,10 @@ class scfclass():
   def extract(self):
     """Write in file different parts of the Hamiltonian"""
     if self.hamiltonian.has_eh: groundstate.swave(self.hamiltonian) 
-  def iterate(self,mixing=0.9):
+  def iterate(self):
     """Perform a single iteration"""
     print("## Iteration number ",self.iteration)
+    mixing = self.mixing 
     self.update_hamiltonian() # update the Hamiltonian
     self.hamiltonian.check() # check that nothing weird happened
     t1 = time.clock()
@@ -379,7 +393,20 @@ def get_occupied_states(es,ws,ks,fermi,smearing=None,mine=None):
     voccs = np.matrix(np.array(voccs))  # as array
     eoccs = np.array(eoccs)  # as array
     koccs = np.array(koccs)  # as array
-  else: raise
+  else:
+    voccs = [] # occupied vectors
+    eoccs = [] # occupied eigenvalues
+    koccs = [] # occupied eigenvalues
+    if mine is None: mine = -1000000 # accept all
+    else: mine = -np.abs(mine)
+    for (e,v,k) in zip(es,ws,ks): # loop over eigenvals,eigenvecs
+      weight = np.sqrt((-np.tanh((e-fermi)/smearing) + 1.0)/2.0) # smearing
+      voccs.append(v*weight) # store
+      eoccs.append(e*weight) # store
+      koccs.append(k) # store
+    voccs = np.matrix(np.array(voccs))  # as array
+    eoccs = np.array(eoccs)  # as array
+    koccs = np.array(koccs)  # as array
   return eoccs,voccs,koccs
 
 
@@ -615,7 +642,7 @@ def write_magnetization(mag):
 def selfconsistency(h,g=1.0,nkp = 100,filling=0.5,mag=None,mix=0.2,
                   maxerror=1e-05,silent=False,mf=None,
                   smearing=None,fermi_shift=0.0,
-                  mode="Hubbard",energy_cutoff=None):
+                  mode="Hubbard",energy_cutoff=None,maxite=1000):
   """ Solve a selfcnsistent Hubbard mean field"""
   os.system("rm -f STOP") # remove stop file
   nat = h.intra.shape[0]//2 # number of atoms
@@ -635,6 +662,7 @@ def selfconsistency(h,g=1.0,nkp = 100,filling=0.5,mag=None,mix=0.2,
   ite = 0 # iteration counter
   scf = scfclass(h) # create scf class
   scf.nkgrid = nkp
+  scf.smearing = smearing
   scf.energy_cutoff = energy_cutoff # energy_cutoff
   scf.filling = filling # filling of the system
 #  scf.mf0 = old_mf # initial mean field
@@ -649,6 +677,8 @@ def selfconsistency(h,g=1.0,nkp = 100,filling=0.5,mag=None,mix=0.2,
   else:
     scf.mf[(0,0,0)] = old_mf # initial mean field
 #  scf.solve()
+  stop_scf = False # do not stop
+  scf.mixing = mix
   while True: # infinite loop
     scf.iterate() # do an iteration
     scf.hamiltonian.write_magnetization() # write the magnetization
@@ -667,8 +697,11 @@ def selfconsistency(h,g=1.0,nkp = 100,filling=0.5,mag=None,mix=0.2,
       print("Error in SCF =",scf.error)
       print("Fermi energy =",scf.fermi)
       print("Gap =",scf.gap)
-    if scf.error<maxerror or os.path.exists("STOP"): # if converged break
-      break
+    if stop_scf: break # stop the calculation
+    if scf.error<maxerror or os.path.exists("STOP") or scf.iteration==maxite: 
+      stop_scf = True # stop the calculation after the next iteration
+      scf.mixing = 1.0 # last iteration with mixing one
+      scf.smearing = None # last iteration without smearing
   file_etot.close() # close file
   file_error.close() # close file
   file_gap.close() # close file

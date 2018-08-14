@@ -5,6 +5,27 @@ from scipy.sparse import csc_matrix as csc
 from scipy.sparse import bmat
 from superconductivity import build_eh
 import superconductivity
+import scipy.linalg as lg
+#from bandstructure import braket_wAw
+import current
+
+
+def braket_wAw(w,A):
+  w = np.matrix(w) # convert to matrix
+  return ((w.T).H*A*w.T)[0,0] # expectation value
+
+
+
+
+def index(h,n=[0]):
+  """Return a projector onto a site"""
+  num = len(h.geometry.r)
+  val = [1. for i in n]
+  m = csc((val,(n,n)),shape=(num,num),dtype=np.complex)
+  return h.spinless2full(m) # return matrix
+
+
+
 
 
 
@@ -255,24 +276,70 @@ def get_sublattice(h,mode="both"):
   return m
 
 
+def get_velocity(h):
+  """Return the velocity operator"""
+  vk = current.current_operator(h)
+  def f(w,k=[0.,0.,0.]):
+    return braket_wAw(w,vk(k)).real
+  return f
 
 
 
 
-def get_valley(h):
-  """Return a callable that calculated the valley expectation value
+
+def get_valley(h,projector=False,delta=None):
+  """Return a callable that calculates the valley expectation value
   using the modified Haldane coupling"""
-  from bandstructure import braket_wAw
   ho = h.copy() # copy Hamiltonian
   ho.clean() # set to zero
   ho.add_modified_haldane(1.0/4.5) # add modified Haldane coupling
   hkgen = ho.get_hk_gen() # get generator for the hk Hamiltonian
-  def fun(w,k=None):
-    if h.dimensionality>0 and k is None: raise # requires a kpoint
-    hk = hkgen(k) # evaluate Hamiltonian
-    return braket_wAw(w,hk).real # return the braket
+  from scipy.sparse import issparse
+  def sharpen(m):
+    """Sharpen the eigenvalues of a matrix"""
+#    return m
+    if delta is None: return m # do nothing
+    if issparse(m): return m # temporal workaround
+    if issparse(m): m = m.todense()
+    (es,vs) = lg.eigh(m) # diagonalize
+    es = es/(np.abs(es)+delta) # renormalize
+    vs = np.matrix(vs) # convert
+    m0 = np.matrix(np.diag(es)) # build new hamiltonian
+    return vs*m0*vs.H
+  if projector: # function returns a matrix
+    def fun(m,k=None):
+      if h.dimensionality>0 and k is None: raise # requires a kpoint
+      hk = hkgen(k) # evaluate Hamiltonian
+      hk = sharpen(hk) # sharpen the valley
+      return m*hk # return the projector
+  else: # conventional way
+    def fun(w,k=None):
+      if h.dimensionality>0 and k is None: raise # requires a kpoint
+      hk = hkgen(k) # evaluate Hamiltonian
+      hk = sharpen(hk) # sharpen the valley
+      return braket_wAw(w,hk).real # return the braket
   return fun # return function
 
+
+
+
+def get_inplane_valley(h):
+  """Returns an operator that computes the absolute value
+  of the intervalley mixing"""
+  ho = h.copy() # copy Hamiltonian
+  ho.clean() # set to zero
+  ho.add_modified_haldane(1.0/4.5) # add modified Haldane coupling
+  hkgen = ho.get_hk_gen() # get generator for the hk Hamiltonian
+  hkgen0 = h.get_hk_gen() # get generator for the hk Hamiltonian
+  def fun(w,k=None):
+#    return abs(np.sum(w*w))
+    if h.dimensionality>0 and k is None: raise # requires a kpoint
+    hk = hkgen(k) # evaluate Hamiltonian
+    hk0 = hkgen0(k) # evaluate Hamiltonian
+    A = hk*hk0 - hk0*hk # commutator
+    A = -A*A
+    return abs(braket_wAw(w,A)) # return the braket
+  return fun # return function
 
 
 

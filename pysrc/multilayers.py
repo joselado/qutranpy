@@ -263,3 +263,28 @@ def bilayer_geometry(g,mvl=None,dz=2.0):
     go.sublattice = np.concatenate([sl,sl]) # two times
   return go
 
+
+
+def get_geometry(name,dz=2.0):
+  """Return the geometry for multilayer graphene"""
+  g = geometry.honeycomb_lattice() # honeycomb lattice
+  if name=="AA":
+    g = bilayer_geometry(g,mvl=[0.,0.],dz=dz)
+  elif name=="AB":
+    g = bilayer_geometry(g,mvl=None,dz=dz)
+  else: raise
+  return g
+
+
+
+def multilayer_hopping(dz=2.0,ti=0.3):
+  """Function to calcualte the hopping in multilayer systems"""
+  def fun(r1,r2):
+    dr = r1-r2
+    if 0.9<dr.dot(dr)<1.1: return 1.0 # first neighbor
+    if abs(dr.dot(dr)-dz**2)<0.1: 
+      if abs(dr[2]**2-dz**2)<0.1: 
+        return ti # first neighbor
+    return 0.0
+  return fun
+

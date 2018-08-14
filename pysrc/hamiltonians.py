@@ -10,7 +10,9 @@ import operators
 import inout
 import superconductivity
 import kanemele 
+import magnetism
 import checkclass
+import extract
 
 from bandstructure import get_bands_0d
 from bandstructure import get_bands_1d
@@ -21,6 +23,7 @@ from rotate_spin import sx,sy,sz
 from increase_hilbert import get_spinless2full,get_spinful2full
 import tails
 from scipy.sparse import diags as sparse_diag
+import pickle
 
 #import data
 
@@ -44,6 +47,11 @@ class hamiltonian():
   def eigenvectors(self,nk=10,kpoints=False,k=None,sparse=False,numw=None):
     return eigenvectors(self,nk=nk,kpoints=kpoints,k=k,
                                  sparse=sparse,numw=numw)
+  def set_filling(self,filling=0.5,nk=10):
+    """Set the Fillign of the Hamiltonian"""
+    es,ws = self.eigenvectors(nk=nk)
+    from scftypes import get_fermi_energy
+    self.shift_fermi(-get_fermi_energy(es,filling)) # shift the fermi energy
   def __init__(self,geometry=None):
     self.has_spin = True # has spin degree of freedom
     self.prefix = "" # a string used a prefix for different files
@@ -64,6 +72,25 @@ class hamiltonian():
     """ Generate kdependent hamiltonian"""
     if self.is_multicell: return multicell.hk_gen(self) # for multicell
     else: return hk_gen(self) # for normal cells
+  def get_gk_gen(self,delta=0.05,operator=None,canonical_phase=False):
+    """Return the Green function generator"""
+    hkgen = self.get_hk_gen() # Hamiltonian generator
+    def f(k=[0.,0.,0.],e=0.0):
+      hk = hkgen(k) # get matrix
+      if canonical_phase: # use a Bloch phase in all the sites
+        U = np.diag([self.geometry.bloch_phase(k,r) for r
+                             in self.geometry.frac_r])
+        U = np.matrix(U) # this is without .H
+        U = self.spinless2full(U) # increase the space if necessary
+        hk = U.H*hk*U
+#        print(csc_matrix(np.angle(hk)))
+#        exit()
+      if operator is not None: hk = operator.H*hk*operator # project
+      out = (np.identity(hk.shape[0])*(e+1j*delta) - hk).I 
+#      print(self.geometry.frac_r) 
+#      exit()
+      return out
+    return f
   def print_hamiltonian(self):
     """Print hamiltonian on screen"""
     print_hamiltonian(self)
@@ -73,6 +100,8 @@ class hamiltonian():
   def get_bands(self,nkpoints=100,use_lines=False,kpath=None,operator=None,
                  num_bands=None,callback=None,central_energy = 0.0):
     """ Returns a figure with teh bandstructure"""
+    # workaround
+    if type(operator)==str: operator = self.get_operator(operator)
     if self.dimensionality==0: # for 0d and 1d system
       return get_bands_0d(self,operator=operator)
     elif self.dimensionality==1: # for 0d and 1d system
@@ -88,10 +117,16 @@ class hamiltonian():
     self.get_bands()
   def add_sublattice_imbalance(self,mass):
     """ Adds a sublattice imbalance """
-    add_sublattice_imbalance(self,mass)
+    if self.geometry.has_sublattice and self.geometry.sublattice_number==2:
+      add_sublattice_imbalance(self,mass)
   def add_antiferromagnetism(self,mass,axis=[0.,0.,1.]):
     """ Adds antiferromagnetic imbalanc """
-    add_antiferromagnetism(self,mass,axis=axis)
+    if self.geometry.has_sublattice:
+      if self.geometry.sublattice_number==2:
+        magnetism.add_antiferromagnetism(self,mass,axis=axis)
+      elif self.geometry.sublattice_number>2:
+        magnetism.add_frustrated_antiferromagnetism(self,mass)
+      else: raise
   def turn_nambu(self):
     """Add electron hole degree of freedom"""
     self.get_eh_sector = get_eh_sector_odd_even # assign function
@@ -118,64 +153,39 @@ class hamiltonian():
         raise # error
   def supercell(self,nsuper):
     """ Creates a supercell of a one dimensional system"""
-    raise # I think the function is buggy
-    import supercell
-    if self.dimensionality==1:
-      hout = supercell.supercell1d(self,nsuper,sparse=self.is_sparse) # modify hoppings
+    if self.dimensionality==0: return self
+    elif self.dimensionality==1: ns = [nsuper,1,1]
+    elif self.dimensionality==2: ns = [nsuper,nsuper,1]
+    elif self.dimensionality==3: ns = [nsuper,nsuper,nsuper]
     else: raise
-    return hout
+    return multicell.supercell_hamiltonian(self,nsuper=ns)
   def set_finite_system(self,periodic=True):
     """ Transforms the system into a finite system"""
     return set_finite_system(self,periodic=periodic) 
-  def write(self,output_file="hamiltonian.in"):
-    """ Write the hamiltonian in hamiltonian_0.in"""
-    from input_tb90 import write_hamiltonian
-    # save multicell Hamiltonian
-    if self.is_multicell: 
-      ps = [(t.dir,t.m) for t in self.hopping] # create pairs
-      inout.save_sparse_pairs(output_file,ps) # save multicell
-      inout.save_sparse_csr(output_file+"/INTRA.npz",self.intra) # intracell
-    else: # old way
-      if self.is_sparse and self.dimensionality == 0:  # zero dimensional
-          print("Saving as sparse")
-          inout.save_sparse_csr("INTRA.npz",csr_matrix(self.intra))
-      else: # normal Hamiltonians
-          write_hamiltonian(self,output_file=output_file)
-
-
-
-    self.geometry.write()
-  def read(self,input_file="hamiltonian.in",dimensionality=None):
-    """ Write the hamiltonian in hamiltonian_0.in"""
-    # if given on input
-    if dimensionality is not None: self.dimensionality = dimensionality
-    # try to read geometry
-    try: 
-      import geometry
-      self.geometry = geometry.read(input_file="POSITIONS.OUT")
-    except: 
-      print("No geometry found")
-    # read the matrices
-    if self.is_multicell: # multicell Hamiltonians
-      ps = inout.read_sparse_pairs(input_file,is_sparse=self.is_sparse) # read pairs
-      self.hopping = multicell.pairs2hopping(ps) # create hopping
-      self.intra = inout.load_sparse_csr(input_file+"/INTRA.npz",
-                         is_sparse=self.is_sparse) # intracell
-    else:
-      if self.is_sparse and self.dimensionality == 0:  # zero dimensional
-          print("Reading as sparse")
-          self.intra = csc_matrix(inout.load_sparse_csr("INTRA.npz"))
-      else:
-        from input_tb90 import read_hamiltonian
-        read_hamiltonian(self,input_file=input_file)
+  def get_gap(self):
+    """Returns the gap of the Hamiltonian"""
+    import gap
+    return gap.indirect_gap(self) # return the gap
+  def save(self,output_file="hamiltonian.pkl"):
+    """ Write the hamiltonian in a file"""
+    inout.save(self,output_file) # write in a file
+  write = save # just in case
+  def read(self,output_file="hamiltonian.pkl"):
+    return load(output_file) # read Hamiltonian
   def total_energy(self,nkpoints=30,nbands=None,random=False,kp=None):
     """ Get total energy of the system"""
     return total_energy(self,nk=nkpoints,nbands=nbands,random=random,kp=kp)
   def add_zeeman(self,zeeman):
     """Adds zeeman to the matrix """
     if self.has_spin:  # if it has spin degree of freedom
+      from magnetism import add_zeeman
       add_zeeman(self,zeeman=zeeman)
-  def turn_spinful(self):
+  def add_magnetism(self,m):
+    """Adds magnetism, new version of zeeman"""
+    if self.has_spin:  # if it has spin degree of freedom
+      from magnetism import add_magnetism
+      add_magnetism(self,m)
+  def turn_spinful(self,enforce_tr=False):
     """Turn the hamiltonian spinful""" 
     if self.is_sparse: # sparse Hamiltonian
       self.turn_dense() # dense Hamiltonian
@@ -188,17 +198,20 @@ class hamiltonian():
         ts(self) # turn spinful
       else:
         from increase_hilbert import spinful
+        from superconductivity import time_reversal
+        def fun(m):
+          return spinful(m)
         if not self.has_spin:
           self.has_spin = True
-          self.intra = spinful(self.intra) 
+          self.intra = fun(self.intra) 
           if self.dimensionality==0: pass
           elif self.dimensionality==1:
-            self.inter = spinful(self.inter) 
+            self.inter = fun(self.inter) 
           elif self.dimensionality==2:
-            self.tx = spinful(self.tx) 
-            self.ty = spinful(self.ty) 
-            self.txy = spinful(self.txy) 
-            self.txmy = spinful(self.txmy) 
+            self.tx = fun(self.tx) 
+            self.ty = fun(self.ty) 
+            self.txy = fun(self.txy) 
+            self.txmy = fun(self.txmy) 
           else: raise
   def remove_spin(self):
     """Removes spin degree of freedom"""
@@ -399,7 +412,7 @@ class hamiltonian():
     """Clean a Hamiltonian"""
     from clean import clean_hamiltonian
     clean_hamiltonian(self)
-  def get_operator(self,name):
+  def get_operator(self,name,projector=False):
     """Return a certain operator"""
     if name=="sx": return operators.get_sx(self)
     elif name=="sy": return operators.get_sy(self)
@@ -417,6 +430,7 @@ class hamiltonian():
     elif name=="zposition": return operators.get_zposition(self)
     elif name=="yposition": return operators.get_yposition(self)
     elif name=="xposition": return operators.get_xposition(self)
+    elif name=="velocity": return operators.get_velocity(self)
     # total magnetizations
     elif name=="mx": 
       return self.get_operator("sx")*self.get_operator("electron")
@@ -424,23 +438,40 @@ class hamiltonian():
       return self.get_operator("sy")*self.get_operator("electron")
     elif name=="mz": 
       return self.get_operator("sz")*self.get_operator("electron")
-    elif name=="valley": return operators.get_valley(self)
+    elif name=="valley": return operators.get_valley(self,projector=projector)
+    elif name=="inplane_valley": return operators.get_inplane_valley(self)
     elif name=="valley_upper": 
       print("This operator only makes sense for TBG")
       ht = self.copy()
       ht.geometry.sublattice = self.geometry.sublattice * (np.sign(self.geometry.z)+1.0)/2.0
       return operators.get_valley(ht)
+    elif name=="inplane_valley_upper": 
+      print("This operator only makes sense for TBG")
+      ht = self.copy()
+      ht.geometry.sublattice = self.geometry.sublattice * (np.sign(self.geometry.z)+1.0)/2.0
+      return operators.get_inplane_valley(ht)
     elif name=="valley_lower": 
       print("This operator only makes sense for TBG")
       ht = self.copy()
       ht.geometry.sublattice = self.geometry.sublattice * (-np.sign(self.geometry.z)+1.0)/2.0
       return operators.get_valley(ht)
     else: raise
+  def extract(self,name="mz"): 
+    """Extract somethign from the Hamiltonian"""
+    if self.has_eh: raise # not implemented
+    if name=="density":
+      return extract.onsite(self.intra,has_spin=self.has_spin)
+    elif name=="mx" and self.has_spin:
+      return extract.mx(self.intra)
+    elif name=="my" and self.has_spin:
+      return extract.my(self.intra)
+    elif name=="mz" and self.has_spin:
+      return extract.mz(self.intra)
+    else: raise
   def write_magnetization(self):
     """Extract the magnetization and write in in a file"""
     if not self.has_eh: # without electron hole
       if self.has_spin: # for spinful
-        import extract
         mx = extract.mx(self.intra)
         my = extract.my(self.intra)
         mz = extract.mz(self.intra)
@@ -733,46 +764,6 @@ def add_sublattice_imbalance(h,mass):
 
 
 
-
-
-def add_antiferromagnetism(h,mass,axis):
-  """ Adds to the intracell matrix an antiferromagnetic imbalance """
-  intra = h.intra # intracell hopping
-  if h.geometry.has_sublattice: pass  # if has sublattice
-  else: # if does not have sublattice
-    print("WARNING, no sublattice present")
-    return 0. # if does not have sublattice
-  if h.has_spin:
-    natoms = len(h.geometry.x) # number of atoms
-    out = [[None for j in range(natoms)] for i in range(natoms)] # output matrix
-    for i in range(natoms): # loop over atoms
-      if callable(mass): mi = mass(h.geometry.r[i]) # call the function
-      else: mi = mass # assume is a number
-      if callable(axis): ax = np.array(axis(h.geometry.r[i])) # call the function
-      else: ax = np.array(axis) # convert to array
-      ax = ax/np.sqrt(ax.dot(ax)) # normalize the direction
-      # add contribution to the Hamiltonian
-      out[i][i] = mi*(sx*ax[0] + sy*ax[1] + sz*ax[2])*h.geometry.sublattice[i]
-    out = bmat(out) # turn into a matrix
-    h.intra = h.intra + h.spinful2full(out) # Add matrix 
-  else:
-    print("no AF for unpolarized hamiltonian")
-    raise
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def build_eh_nonh(hin,c1=None,c2=None):
   """Creates a electron hole matrix, from an input matrix, coupling couples
      electrons and holes
@@ -826,41 +817,6 @@ def set_finite_system(hin,periodic=True):
   
 
 from spectrum import total_energy
-
-
-def add_zeeman(h,zeeman=[0.0,0.0,0.0]):
-  """ Add Zeeman to the hamiltonian """
-  # convert the input into a list
-  def convert(z):
-    try: # try to get the first element
-      a = z[0]
-    except: # convert to list
-      z = [0.,0.,z]
-    return z
-  from scipy.sparse import coo_matrix as coo
-  from scipy.sparse import bmat
-  if h.has_spin: # only if the system has spin
-   # no = h.num_orbitals # number of orbitals (without spin)
-    no = h.intra.shape[0]//2 # number of orbitals (without spin)
-    # create matrix to add to the hamiltonian
-    bzee = [[None for i in range(no)] for j in range(no)]
-    # assign diagonal terms
-    if not callable(zeeman): # if it is a number
-      for i in range(no):
-        zeeman = convert(zeeman) # convert to list
-        bzee[i][i] = zeeman[0]*sx+zeeman[1]*sy+zeeman[2]*sz
-    elif callable(zeeman): # if it is a function
-      r = h.geometry.r  # z position
-      for i in range(no):
-        mm = zeeman(r[i])  # get the value of the zeeman
-        mm = convert(mm) # convert to list
-        bzee[i][i] = mm[0]*sx+mm[1]*sy+mm[2]*sz
-    else:
-      raise
-    bzee = bmat(bzee) # create matrix
-    h.intra = h.intra + h.spinful2full(bzee) # Add matrix 
-  if not h.has_spin:  # still have to implement this...
-    raise
 
 
 def des_spin(m,component=0):
@@ -1184,5 +1140,10 @@ def turn_nambu(self):
   self.has_eh = True
 
 
+import inout
+
+
+
+def load(input_file="hamiltonian.pkl"):  return inout.load(input_file)
 
 

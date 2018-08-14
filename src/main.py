@@ -54,17 +54,44 @@ def modify(name,value,active=False):
 
 def get_geometry():
   """Get geometry used"""
+  import ribbon
   lattice_name = builder.get_object("geometry").get_active_text()
   if lattice_name=="Honeycomb zigzag":
     geometry_builder = geometry.honeycomb_zigzag_ribbon
   elif lattice_name=="Honeycomb armchair":
     geometry_builder = geometry.honeycomb_armchair_ribbon
+  elif lattice_name=="Triangular":
+      def geometry_builder(n):
+          g = geometry.triangular_lattice()
+          return ribbon.bulk2ribbon(g,n=n,clean=True)
+  elif lattice_name=="Kagome":
+      def geometry_builder(n):
+          g = geometry.kagome_lattice()
+          return ribbon.bulk2ribbon(g,n=n,clean=True)
+  elif lattice_name=="Lieb":
+      def geometry_builder(n):
+          g = geometry.lieb_lattice()
+          return ribbon.bulk2ribbon(g,n=n,clean=True)
   elif lattice_name=="Square":
-    geometry_builder = geometry.square_tetramer_ribbon
+      def geometry_builder(n):
+          g = geometry.square_lattice()
+          return ribbon.bulk2ribbon(g,n=n,clean=True)
   elif lattice_name=="Chain":
     geometry_builder = geometry.chain
   g = geometry_builder(int(get("width"))) # get the unit cell
   return g # return geometry
+
+
+
+
+def show_structure(self):
+    g = get_geometry()
+    g = g.supercell(3)
+    g.write()
+    os.system("qh-structure-bond POSITIONS.OUT &")
+
+
+
 
 
 
@@ -159,7 +186,7 @@ def get_bands_right(self):
   h = get_hamiltonian(name="R")
   op = get_operator_bands(h,"operator_R")
   h.get_bands(operator=op)
-  os.system("tb90-bands &")
+  os.system("qh-bands &")
 
 
 
@@ -167,7 +194,7 @@ def get_bands_central(self):
   h = get_hamiltonian(name="C")
   op = get_operator_bands(h,"operator_C")
   h.get_bands(operator=op)
-  os.system("tb90-bands &")
+  os.system("qh-bands &")
 
 
 
@@ -175,7 +202,7 @@ def get_bands_left(self):
   h = get_hamiltonian(name="L")
   op = get_operator_bands(h,"operator_L")
   h.get_bands(operator=op)
-  os.system("tb90-bands &")
+  os.system("qh-bands &")
 
 
 ##################################
@@ -331,6 +358,7 @@ signals["run_hamiltonian"] = run_hamiltonian  # initialize and run
 signals["run_energy"] = run_energy  # initialize and run
 signals["run_length"] = run_length  # initialize and run
 signals["run_disorder"] = run_disorder  # initialize and run
+signals["show_structure"] = show_structure  # initialize and run
 
 # update signals
 signals["update_mxyz2m"] = update_mxyz2m  # initialize and run

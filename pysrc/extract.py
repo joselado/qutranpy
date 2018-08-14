@@ -56,10 +56,25 @@ def my(m):
   n = m.shape[0]//2 # number of sites
   ds = np.zeros(n).real # pairing
   for i in range(n):
-    ds[i] = m[2*i,2*i+1].imag
+    ds[i] = -m[2*i,2*i+1].imag
   return ds
 
 
+
+def onsite(m,has_spin=True):
+  """Extract the z component of the magnetism, assume spin degree of freedom"""
+  if has_spin: # has spin degree of freedom
+    n = m.shape[0]//2 # number of sites
+    ds = np.zeros(n).real # pairing
+    for i in range(n):
+      ds[i] = (m[2*i,2*i].real + m[2*i+1,2*i+1].real)/2.
+    return ds
+  else:
+    n = m.shape[0] # number of sites
+    ds = np.zeros(n).real # pairing
+    for i in range(n):
+      ds[i] = m[i,i].real
+    return ds
 
 
 

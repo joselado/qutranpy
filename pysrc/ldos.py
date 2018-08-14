@@ -123,7 +123,7 @@ def slabldos(h,energies=np.linspace(-1.0,1.0,40),delta=None,nk=40):
       f.write(str(ds[ie,iz])+"   ")
       f.write(str(h.geometry.z[iz])+"\n")
   f.close()
- 
+  return energies,np.transpose(ds) # retunr LDOS 
 
 
 
@@ -189,6 +189,7 @@ def ldos2d(h,e=0.0,delta=0.001,nrep=3,nk=None,mode="green",
   write_ldos(go.x,go.y,d.tolist()*(nrep**2),z=go.z) # write in file
 
 
+ldos = ldos2d
 
 
 def multi_ldos(h,es=[0.0],delta=0.001,nrep=3,nk=2,numw=3,random=False):
@@ -238,7 +239,7 @@ def multi_ldos(h,es=[0.0],delta=0.001,nrep=3,nk=2,numw=3,random=False):
     fo.flush() # flush
   fo.close() # close file
   # Now calculate the DOS
-  from dosf90 import calculate_dos
+  from dos import calculate_dos
   es2 = np.linspace(min(es),max(es),len(es)*10)
   ys = calculate_dos(evals,es2,delta) # use the Fortran routine
   from dos import write_dos

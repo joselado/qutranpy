@@ -17,6 +17,7 @@ class geometry:
   """ Class for a geometry in a system """
   def __init__(self):
     self.has_sublattice = False # has sublattice index
+    self.sublattice_number = 2 # two sublattices
     self.has_fractional = False
     self.dimensionality = 1 # dimension of the hamiltonian
     self.x = [] # positions in x
@@ -74,6 +75,7 @@ class geometry:
       s = supercell3d(self,n1=nsuper1,n2=nsuper2,n3=nsuper3)
     else: raise
     s.center()
+    s.get_fractional()
     return s
   def xyz2r(self):
     """Updates r atributte according to xyz"""
@@ -136,6 +138,12 @@ class geometry:
         self.lattice_name = "triangular"
   def get_k2K(self):
     return get_k2K(self)
+  def get_k2K_generator(self):
+    R = self.get_k2K() # get the matrix
+    def f(k):
+      r = np.matrix(k).T # real space vectors
+      return np.array((R*r).T)[0]
+    return f # return function
   def get_fractional(self):
     """Fractional coordinates"""
     get_fractional(self) # get fractional coordinates
@@ -702,10 +710,15 @@ def cubic_lattice():
   return g
 
 
+def cubic_lieb_lattice():
+  """Return a 3d Lieb lattice"""
+  g = cubic_lattice()
+  g = g.remove(0) # remove this atom
+  return g
 
 
 def lieb_lattice():
-  """ Create a Lieb lattice"""
+  """ Create a 2d Lieb lattice"""
   g = geometry() # create geometry
   g.x = np.array([-0.5,0.5,0.5])
   g.y = np.array([-0.5,-0.5,0.5])
@@ -734,7 +747,9 @@ def kagome_lattice():
   g.dimensionality = 2 # two dimensional system
   g.xyz2r() # create r coordinates
   g.center()
-  g.has_sublattice = False # does not have sublattice index
+  g.has_sublattice = True # does not have sublattice index
+  g.sublattice_number = 3 # three sublattices
+  g.sublattice = [0,1,2] # the three sublattices
   return g
 
 
@@ -1102,9 +1117,12 @@ def get_fractional(g):
       rn = np.array([rn.T[0,i] for i in range(dim)]) # convert to array
       store.append(rn) # store
     store = np.array(store) # convert to array
-    if dim>0: g.frac_x = (store[:,0]+0.001)%1.
-    if dim>1: g.frac_y = (store[:,1]+0.001)%1.
-    if dim>2: g.frac_z = (store[:,2]+0.001)%1.
+    for i in range(dim):
+      store[:,i] = store[:,i] - np.min(store[:,i])
+    store = (store[:,:])%1.
+    if dim>0: g.frac_x = store[:,0]
+    if dim>1: g.frac_y = store[:,1]
+    if dim>2: g.frac_z = store[:,2]
     g.frac_r = np.array([store[:,i] for i in range(dim)]).transpose()
 
 
@@ -1229,8 +1247,49 @@ def diamond_lattice_minimal():
   return g
 
 
+
+
+def pyrochlore_lattice():
+  """Return a pyrochlore lattice"""
+  rs = [np.array([0.,0.,0.])]
+  rs += [np.array([-.25,.25,0.])]
+  rs += [np.array([0.,.25,.25])]
+  rs += [np.array([-.25,0.,.25])]
+  fac = np.sqrt(rs[1].dot(rs[1])) # distance to FN
+  rs = [np.array(r)/fac for r in rs] # positions
+  g = geometry() # create geometry
+  g.a1 = np.array([-.5,.5,0.])/fac # lattice vector
+  g.a2 = np.array([0.,.5,.5])/fac # lattice vector
+  g.a3 = np.array([-.5,0.,.5])/fac # lattice vector
+  g.dimensionality = 3 # three dimensional system
+  g.has_sublattice = True
+  g.sublattice_number = 4 # three sublattices
+  g.sublattice = [1,0,3,2] # the three sublattices
+#  g.sublattice = np.array([1,-1])
+  g.r = np.array(rs) # store
+  g.r2xyz() # create r coordinates
+  g.center() # center the geometry
+  g.get_fractional()
+  return g
+
+
+
+def tetrahedral_lattice():
+  """Return a single layer of the pyrochlore lattice"""
+  g = pyrochlore_lattice()
+  import films
+  g = films.geometry_film(g,nz=1)
+  return g
+
+
+
+
+
+
+
 # use the cubic one as the default one
-diamond_lattice = cubic_diamond_lattice 
+#diamond_lattice = cubic_diamond_lattice 
+diamond_lattice = diamond_lattice_minimal
 
 
 
@@ -1342,6 +1401,17 @@ def neighbor_cells(num,dim=3):
 
 
 
+
+
+
+def write_profile(g,d,name="PROFILE.OUT",nrep=1):
+  """Write a certain profile in a file"""
+  if g.dimensionality == 0: nrep =1
+  x,y = g.x,g.y # get the coordinates
+  go = g.copy() # copy geometry
+  go = go.supercell(nrep) # create supercell
+  m = np.matrix([go.x,go.y,d.tolist()*(nrep**g.dimensionality),go.z]).T
+  np.savetxt(name,m) # save in file
 
 
 

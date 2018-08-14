@@ -16,15 +16,15 @@ def m2spin(matin,matin2=[]):
   return matout
 
 
-def spinful(m):
+def spinful(m,m2=None):
   """ Return a spinful hamiltonian"""
-  if type(m)==type(np.matrix): return m2spin(m,matin2=m)
-  else: return spinful_sparse(m)
+  if type(m)==type(np.matrix): return m2spin(m,matin2=m2)
+  else: return spinful_sparse(m,m2=m2)
 
 
-def spinful_sparse(m):
+def spinful_sparse(m,m2=None):
   """ Return a spinful hamiltonian"""
-  return m2spin_sparse(m)
+  return m2spin_sparse(m,matin2=m2)
 
 
 def m2spin_sparse(matin,matin2=None):

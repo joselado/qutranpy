@@ -134,7 +134,7 @@ class heterostructure():
   def didv(self,energy=0.0,delta=None,error=1e-4,nk=500,kwant=False):
     if delta is None: delta = self.delta # set the own delta
     if self.dimensionality==1: # one dimensional
-      return didv(self,energy=energy,delta=delta,kwant=False) # return value
+      return didv(self,energy=energy,delta=delta,kwant=kwant) # return value
     elif self.dimensionality==2: # two dimensional
       # function to integrate
       f = lambda k: self.generate(k).didv(energy=energy,delta=delta)

@@ -98,5 +98,3 @@ def non_orthogonal_supercell(g,m):
 
 
 
-
-
